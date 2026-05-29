@@ -15,9 +15,9 @@ No hooks, no auto-injection. The skill is explicit: Claude reads and updates the
 ## Install (per project)
 
 ```bash
-mkdir -p .claude/skills
+mkdir -p .claude/skills/docs-pattern
 curl -sL https://github.com/fbdeme/docs-pattern/archive/main.tar.gz \
-  | tar xz -C .claude/skills --strip-components=1
+  | tar xz -C .claude/skills/docs-pattern --strip-components=1
 ```
 
 This drops `SKILL.md`, `templates/`, and `scripts/` into `.claude/skills/docs-pattern/`.
