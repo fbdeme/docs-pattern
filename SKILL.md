@@ -2,7 +2,7 @@
 name: docs-pattern
 description: "Bootstrap and maintain the personal project-docs pattern under docs/: current_status.md (where things stand right now), history.md (what changed over time), issues.md (numbered technical issues + resolution), todo.md (categorized checklist), and optionally research_method.md (versioned methodology spec). Use when the user wants to initialize this pattern in a new project ('docs 패턴 깔아줘', 'docs init', 'set up project docs', 'init docs-pattern'), or wants to update any of those files after doing work ('current_status 업데이트', 'history에 추가', '이슈 등록해줘', 'todo 정리', 'mark X done', 'log session', 'project status update'). Skill enforces which file gets which kind of information."
 metadata:
-  version: "1.0"
+  version: "1.1"
   status: active
 ---
 
@@ -52,6 +52,16 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/init-docs.sh --no-research
 - 새 세션은 `## Session YYYY-MM-DD — 제목` 헤딩으로 **파일 상단**(헤더 바로 아래)에 prepend.
 - 서버/하드웨어 환경이 의미 있으면 `**서버**: ...` 한 줄로 명시.
 - 표·체크리스트 적극 사용. 산문은 핵심만.
+
+#### 멀티 에이전트 / 협업 시
+
+여러 사람·에이전트가 한 repo에서 각자 브랜치로 작업할 때, `current_status.md`는
+**세션 핸드오프 로그**가 된다 — 다음 사람/에이전트가 작업 전 먼저 읽고 맥락을 이어받는다.
+
+- **단일 소스**: "지금 상태"의 유일한 출처. `LATEST.md` 같은 **평행 상태 파일을 새로 만들지 말 것** (진실이 갈라진다).
+- **작성자 태그**: 세션 헤딩에 이름을 붙인다 — `## Session YYYY-MM-DD — 제목 (작성자)`.
+- **실시간 상태는 여기가 아님**: "지금 누가 뭐 하는 중"은 이슈 트래커/보드(assign·진행 중)가 담당. 이 파일은 머지된 *확정 맥락*만 담는다 (git은 머지 시점에만 공유됨).
+- **충돌 완화**: prepend 충돌이 잦아지면 세션을 `docs/sessions/<날짜>-<이름>.md`로 1인 1파일 분리하고, `current_status.md`는 요약/인덱스만 유지한다.
 
 ### `history.md`
 
@@ -104,3 +114,4 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/init-docs.sh --no-research
 | `history.md`를 "무엇을 했다" 로그로 사용 | 그건 `current_status.md`/`progress`. history는 **방향성 변경 이유** |
 | 리서치 아닌 프로젝트에 `research_method.md` 강제 | 옵션. `--no-research` 또는 그냥 생략 |
 | 모든 파일을 매 응답마다 자동 읽기 | 사용자가 요청하거나 명시적으로 필요할 때만 |
+| 협업 시 `LATEST.md` 등 평행 상태 파일 새로 만들기 | `current_status.md` 단일 소스 유지 (필요하면 `docs/sessions/`로 분리) |
