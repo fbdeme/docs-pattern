@@ -167,7 +167,7 @@ def build(hub, memory_dir=MEMORY_DIR, skills_dir=SKILLS_DIR, sessions=SESSIONS):
     ltm_targets = {k: f"long-term-memory/{p.name}" for p in ltm for k in memo_keys(p)}
     ORDER = ("INTERX", "workspace", "SapiensQ")   # 사용자가 정한 조직 순서, 나머지는 뒤에 가나다
     orgs = sorted((o for o in (hub / "projects").iterdir() if o.is_dir()), key=lambda o: (ORDER.index(o.name) if o.name in ORDER else 99, o.name)) if (hub / "projects").exists() else []
-    projects = [p for o in orgs for p in sorted(o.iterdir()) if p.is_dir() and not p.name.startswith("_") and p.name != "rules"]
+    projects = [p for o in orgs for p in sorted(o.iterdir()) if p.is_dir() and not p.name.startswith(("_", ".")) and p.name != "rules"]   # . = 조직 폴더가 따로 git 이면 .git
     registry = {o.name: read_registry(o) for o in orgs}   # 조직마다 _registry.md: 이름 · status · 경로 · 메모
     rows, nodes, edges, proj_nav, links = [], [], [], {}, {}
     for proj in projects:
@@ -391,6 +391,7 @@ def selftest():
         w("mem/ltm_old.md", "---\nname: ltm-old\narea: 새분야\nstatus: archived\n---\n옛것")
         w("skills/s1/SKILL.md", "---\nname: s1\ndescription: a|b\n---\n")
         (t / "sess").mkdir()
+        (t / "hub/projects/o/.git").mkdir(parents=True)   # 조직 폴더가 따로 git repo 여도 .git 은 프로젝트가 아니다
         w("ext/Home.md", "# 입구"); w("ext/concepts.md", "# 개념"); w("ext/concepts/cq.md", "---\ntitle: CQ\n---\n")
         w("ext/legacy/old.md", "# 옛것"); w("ext/how-to/x.md", "# 하기")
         (t / "hub/projects/o/p/mounts").mkdir(parents=True)

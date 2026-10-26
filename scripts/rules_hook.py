@@ -49,7 +49,7 @@ def is_hub(p):
 
 
 def hub_projects():
-    return sorted(d for d in (HUB / "projects").glob("*/*") if d.is_dir() and not d.name.startswith("_"))
+    return sorted(d for d in (HUB / "projects").glob("*/*") if d.is_dir() and not d.name.startswith(("_", ".")))   # . = 조직 폴더의 .git 등
 
 
 def hub_by_name(name):
