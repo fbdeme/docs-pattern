@@ -320,6 +320,20 @@ def always_text(store=None, skills_dir=None):
     return text, warns
 
 
+def infra_text(store=None):
+    """_infra.md 의 <!-- core --> -> (text, warns). 조직 · 머신 · GPU · 네트워크 설정표, 세션 시작에 들어간다"""
+    f, warns = Path(store or STORE) / "_infra.md", []
+    if not f.exists():
+        return "", warns
+    m = re.search(r"<!-- core -->\n?(.*?)<!-- /core -->", f.read_text(encoding="utf-8"), re.S)
+    if not m:
+        return "", [f"{f}: <!-- core --> 없음"]
+    text = f"[infra] 인프라 설정 — 원본 {f} (자세한 것 = 그 파일 아래 · 정본 repo). 바뀌면 그 파일을 고친다.\n\n{m.group(1).strip()}\n"
+    if len(text) > ALWAYS_LIMIT:
+        warns.append(f"인프라 {len(text):,}자 > {ALWAYS_LIMIT:,}자 — 10,000자를 넘으면 파일로 빠진다")
+    return text, warns
+
+
 def selftest():
     with tempfile.TemporaryDirectory() as tmp:
         m = Path(tmp)
@@ -401,6 +415,12 @@ def selftest():
         assert (st / "s1.md").exists(), "보관이 원본을 지움"
         for n in ("s1", "s2", "s3", "s4", "s5"): (st / f"{n}.md").unlink()
         sync_views(st, {"personal": av})
+        assert infra_text(st) == ("", []), "_infra.md 없으면 빈 글"
+        (st / "_infra.md").write_text("# x\n<!-- core -->\n머신표\n<!-- /core -->\n자세히만\n")
+        it = infra_text(st)[0]
+        assert "머신표" in it and "자세히만" not in it and "[infra]" in it, it
+        assert "머신표" not in always_text(st, m / "noskills")[0] and "_infra" not in (av / "MEMORY.md").read_text(), "인프라가 필수·색인에 섞임"
+        (st / "_infra.md").unlink()
         sk = m / "skills"
         for n, body in (("small", "짧은 본문"), ("cored", "앞\n<!-- core -->\n핵심만\n<!-- /core -->\n" + "x" * 5000), ("big", "y" * 5000)):
             (sk / n).mkdir(parents=True); (sk / n / "SKILL.md").write_text(f"---\nname: {n}\n---\n{body}")
@@ -425,6 +445,12 @@ def selftest():
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
         selftest()
+        sys.exit(0)
+    if "--infra" in sys.argv:   # 두 번째 SessionStart hook: 필수 주입과 따로 재진다(hook 문자열마다 10,000자)
+        text, warns = infra_text()
+        for w in warns:
+            print("WARN", w, file=sys.stderr)
+        print(text, end="")
         sys.exit(0)
     if "--always" in sys.argv:
         text, warns = always_text()
