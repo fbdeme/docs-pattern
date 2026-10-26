@@ -207,7 +207,7 @@ def sync_views(store=None, views=None):
 
 
 TYPES = {"feedback": ("목적", "언제", "절차", "Why"), "user": ("무엇",), "reference": ("무엇",), "project": ("무엇", "정본")}
-DESC_MAX, BODY_MAX = 80, 3000
+DESC_MAX, BODY_MAX, CORE_MAX = 80, 3000, 400
 JOURNAL = re.compile(r"^(?!\s*(?:[-*]|\d+\.)\s)\**\s*\d{4}-\d{2}-\d{2}[^\n]*(추가|갱신|:)", re.M)
 
 
@@ -258,6 +258,8 @@ def lint(store=None):
         if p.name.startswith("_"):
             continue
         f, text = fm(p), p.read_text(encoding="utf-8")
+        if archived(f):   # 보관 메모는 고칠 대상이 아니다
+            continue
         body = text[4:].partition("\n---\n")[2] if text.startswith("---\n") else text
         add = lambda m: out.append((p.name, m))
         if f.get("name") != p.stem: add("name ≠ 파일 이름")
@@ -271,6 +273,18 @@ def lint(store=None):
             if f"**{h}" not in body: add(f"소제목 **{h}:** 없음 ({f.get('type')} 틀)")
         if f.get("type") == "feedback" and len(re.findall(r"^\d+\. ", body, re.M)) > 7: add("절차 7단계 초과(스킬로 올릴 후보)")
         if JOURNAL.search(body): add("날짜 일지 문단(→ **사례:** 목록 한 줄로)")
+        core = re.search(r"<!-- core -->\n?(.*?)<!-- /core -->", body, re.S)
+        if core:   # 짧은 판(core)과 전체(본문)를 나눠 짧게 써도 빠지지 않게 — templates/memory/README.md
+            c = core.group(1).strip()
+            if len(c) > CORE_MAX: add(f"core {CORE_MAX}자 초과(본문으로 내릴 것)")
+            if f.get("type") == "feedback" and "→" not in c: add("core 에 '<언제> → <무엇>' 형식 없음")
+            if f.get("type") in ("user", "reference") and any(l.strip() and not l.lstrip().startswith(("- ", "|")) for l in c.splitlines()):
+                add("core 는 '- 키: 값' 줄만")
+        if f.get("type") == "feedback":
+            why = re.search(r"\*\*Why:\*\*(.*?)(?=\n\*\*[^*\n]+:\*\*|\Z)", body, re.S)
+            w = why.group(1).strip() if why else ""
+            if why and len(w) < 10: add("Why 비어 있음(날짜와 근거 한 줄)")
+            elif why and not re.search(r"\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}", w): add("Why 에 날짜 없음")
         for a in areas_of(f) if tags is not None else ():
             if a in alias: add(f"태그 동의어 '{a}' (→ {alias[a]})")
             elif a not in tags and a.split("/")[0] not in tags: add(f"태그 목록에 없음 '{a}' (_tags.md 에 한 줄 더하거나 있는 태그로)")
@@ -376,13 +390,23 @@ def selftest():
         sync_views(st, vw)
         assert "가" * TITLE_MAX + "…](long.md)" in (vw["a"] / "MEMORY.md").read_text(), "긴 제목이 잘리지 않음"
         (st / "good.md").write_text("---\nname: good\ndescription: d\ntype: feedback\narea: 일하는 방식\nupdated: 2026-10-26\n---\n"
-                                    "**목적:** x\n**언제:** y\n**절차:**\n1. a → b\n**Why:** z\n**사례:**\n- 2026-09-04 일\n")
+                                    "**목적:** x\n**언제:** y\n**절차:**\n1. a → b\n**Why:** 2026-09-04 사용자 \"이렇게 해\"\n**사례:**\n- 2026-09-04 일\n")
         (st / "bad.md").write_text("---\nname: 다른이름\ndescription: d\ntype: feedback\nindex: i\n---\n규칙.\n\n2026-09-04 추가: 또 생김\n")
         L = lint(st)
         assert not [m for f_, m in L if f_ == "good.md"], [m for f_, m in L if f_ == "good.md"]
         bad = {m for f_, m in L if f_ == "bad.md"}
         for need in ("name ≠ 파일 이름", "area 없음", "index 칸은 쓰지 않음", "소제목 **목적:** 없음 (feedback 틀)", "날짜 일지 문단(→ **사례:** 목록 한 줄로)"):
             assert need in bad, (need, bad)
+        (st / "fb.md").write_text("---\nname: fb\ndescription: d\ntype: feedback\narea: 일하는 방식\nupdated: 2026-10-26\n---\n<!-- core -->\n늘 검증한다\n<!-- /core -->\n**목적:** x\n**언제:** y\n**절차:**\n1. z\n**Why:** 이유만 있고 날짜는 없음\n")
+        (st / "fb2.md").write_text("---\nname: fb2\ndescription: d\ntype: feedback\narea: 일하는 방식\nupdated: 2026-10-26\n---\n<!-- core -->\n보고 전 → 검증한다\n<!-- /core -->\n**목적:** x\n**언제:** y\n**절차:**\n1. z\n**Why:**\n**사례:**\n")
+        (st / "rf.md").write_text("---\nname: rf\ndescription: d\ntype: reference\narea: 사용자\nupdated: 2026-10-26\n---\n<!-- core -->\n문장으로 쓴 core\n<!-- /core -->\n**무엇:** x\n")
+        (st / "ok.md").write_text("---\nname: ok\ndescription: d\ntype: feedback\narea: 일하는 방식\nupdated: 2026-10-26\n---\n<!-- core -->\n보고 전 → 검증한다\n<!-- /core -->\n**목적:** x\n**언제:** y\n**절차:**\n1. z\n**Why:** 2026-10-26 사용자 \"검증해\"\n")
+        L = {}
+        for f_, m_ in lint(st): L.setdefault(f_, []).append(m_)
+        assert "core 에 '<언제> → <무엇>' 형식 없음" in L.get("fb.md", []) and "Why 에 날짜 없음" in L.get("fb.md", []), L.get("fb.md")
+        assert "Why 비어 있음(날짜와 근거 한 줄)" in L.get("fb2.md", []) and not any("core" in x for x in L.get("fb2.md", [])), L.get("fb2.md")
+        assert "core 는 '- 키: 값' 줄만" in L.get("rf.md", []) and "ok.md" not in L, (L.get("rf.md"), L.get("ok.md"))
+        for n in ("fb", "fb2", "rf", "ok"): (st / f"{n}.md").unlink()
         (st / "good.md").unlink(); (st / "bad.md").unlink()
         (st / "_tags.md").write_text("# 태그\n- **실험과 데이터** — 학습 · 평가 · 동의어: 실험, 데이터\n- **사용자** — 누구인지\n")
         for n, a in (("t1", "[실험과 데이터, 사용자]"), ("t2", "실험"), ("t3", "새태그"), ("t4", "실험과 데이터/평가")):
