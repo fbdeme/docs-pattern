@@ -1,49 +1,19 @@
 #!/usr/bin/env bash
-# Initialize the docs-pattern in the current project's docs/ directory.
-# Usage:
-#   bash init-docs.sh              # all 5 files including research_method.md
-#   bash init-docs.sh --no-research # 4 files, skip research_method.md
-#
-# Existing files are NEVER overwritten.
-
+# docs-pattern v2 init — creates docs/{state,issues,documentation,history,_inbox} + first pages, then builds.
+# Usage: bash init-docs.sh [DOCS_DIR]   (default: docs)
+# Existing files are never overwritten.
 set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TEMPLATES_DIR="$(cd "$SCRIPT_DIR/../templates" && pwd)"
-
-INCLUDE_RESEARCH=1
-for arg in "$@"; do
-  case "$arg" in
-    --no-research) INCLUDE_RESEARCH=0 ;;
-    -h|--help)
-      sed -n '2,8p' "$0" | sed 's/^# //;s/^#//'
-      exit 0
-      ;;
-    *) echo "unknown arg: $arg" >&2; exit 2 ;;
-  esac
+SKILL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DOCS="${1:-docs}"
+TODAY="$(date +%F)"
+mkdir -p "$DOCS"/{state,issues,documentation,history/issues,_inbox}
+cd "$SKILL/templates"
+for f in state/S001.md documentation/overview.md history/state/S001.md history/documentation/overview.md; do
+  dest="$OLDPWD/$DOCS/$f"
+  if [ -e "$dest" ]; then echo "skip  $f"; continue; fi
+  mkdir -p "$(dirname "$dest")"
+  sed "s/@DATE@/$TODAY/" "$f" > "$dest"
+  echo "made  $f"
 done
-
-mkdir -p docs
-
-FILES=(current_status.md history.md issues.md todo.md)
-[ "$INCLUDE_RESEARCH" = "1" ] && FILES+=(research_method.md)
-
-CREATED=()
-SKIPPED=()
-for f in "${FILES[@]}"; do
-  if [ -e "docs/$f" ]; then
-    SKIPPED+=("$f")
-  else
-    cp "$TEMPLATES_DIR/$f" "docs/$f"
-    CREATED+=("$f")
-  fi
-done
-
-if [ "${#CREATED[@]}" -gt 0 ]; then
-  echo "created in docs/:"
-  printf '  %s\n' "${CREATED[@]}"
-fi
-if [ "${#SKIPPED[@]}" -gt 0 ]; then
-  echo "skipped (already exists):"
-  printf '  %s\n' "${SKIPPED[@]}"
-fi
+cd "$OLDPWD"
+python3 "$SKILL/scripts/docs_build.py" "$DOCS"

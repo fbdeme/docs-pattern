@@ -1,0 +1,10 @@
+/* docs-hub 관계 그래프 — Material 테마 변수를 따라 밝은/어두운 모드가 바뀐다 */
+.hub-graph { height: 70vh; min-height: 420px; margin: 8px 0 16px; border: 1px solid var(--md-default-fg-color--lightest); border-radius: 8px; background: var(--md-default-bg-color); }
+.hub-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 11px; color: var(--md-default-fg-color--light); margin: 0 0 24px; }
+.hub-legend span { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+.hub-legend span.off { opacity: .35; }
+.hub-legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.hub-legend .bad i { box-shadow: 0 0 0 2px #d84a4a; background: transparent; }
+.hub-legend span.bad.on { color: #d84a4a; }
+.hub-legend span.all { font-weight: 600; }
+.hub-legend span.all.on { color: var(--md-accent-fg-color); }
