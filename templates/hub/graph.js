@@ -5,10 +5,10 @@
   const dark = document.body.getAttribute("data-md-color-scheme") === "slate";
   const C = {   // 채도를 낮춘 종류색, 강조는 project 하나
     org: dark ? "#e6e6e6" : "#222", project: dark ? "#8fa8ff" : "#3f51b5", state: "#5b8def", issues: "#d9a441", rules: "#4fa37a", doc: "#9a7bd1",
-    memo: dark ? "#7f9aa8" : "#8aa1ad", area: dark ? "#c8ccd4" : "#5f6670", skill: dark ? "#9aa3b2" : "#6b7685",
+    memo: dark ? "#7f9aa8" : "#8aa1ad", area: dark ? "#c8ccd4" : "#5f6670", skill: dark ? "#9aa3b2" : "#6b7685", store: dark ? "#e08a6b" : "#c0583a",
   };
   const NAME = { org: "조직", project: "프로젝트", state: "단계", issues: "이슈", rules: "Short Term Memory", doc: "Document",
-                 memo: "Long Term Memory 메모", area: "분야(area)", skill: "스킬" };
+                 memo: "Long Term Memory 메모", area: "분야(area)", skill: "스킬", store: "데이터 저장소" };
   const fg = getComputedStyle(document.body).getPropertyValue("--md-default-fg-color") || (dark ? "#ddd" : "#222");
   fetch(el.dataset.src).then(r => r.json()).then(g => {
     const deg = {};

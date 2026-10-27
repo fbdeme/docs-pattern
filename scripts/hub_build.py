@@ -36,6 +36,7 @@ MEMORY_DIR = HOME / "memory"   # v3 공유 메모리 원본 (계정별 보기 = 
 SKILLS_DIR = HOME / ".claude/skills"
 SESSIONS = HOME / ".claude/projects"
 SKIP = {"history", "_build", "_inbox", "mounts"}
+ASSETS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".pdf"}   # page 가 가리키는 그림 — 복사하지 않고 심링크
 LINK = re.compile(r"(?<!!)\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]")
 
 
@@ -146,6 +147,25 @@ def mount_nav(root, base):
     return tree(root, "")
 
 
+def stores_of(proj):
+    """projects/<조직>/_catalog/stores.json 중 이 프로젝트의 저장소 -> [{store, kind, label}]. 구조 파일이 있으면 테이블 수를 붙인다"""
+    cat = proj.parent / "_catalog"
+    try:
+        ledger = json.loads((cat / "stores.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    out = []
+    for st in (x for x in ledger if x.get("project") == proj.name):
+        try:
+            d = json.loads((cat / f"{st['store']}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            d = {}
+        n = (f"테이블 {len(d['tables'])} · 외래키 {sum(len(t['fks']) for t in d['tables'])}" if "tables" in d
+             else f"클래스 {d['classes']} · 트리플 {d['default_triples']:,}" if "classes" in d else "구조 미수집")
+        out.append({"store": st["store"], "kind": st["kind"], "label": f"{st['store']} ({st['kind']} · {n})"})
+    return out
+
+
 def read_registry(org):
     """projects/<조직>/_registry.md 의 표 -> [{name, status, path, docs, note}]"""
     f = org / "_registry.md"
@@ -194,6 +214,9 @@ def build(hub, memory_dir=MEMORY_DIR, skills_dir=SKILLS_DIR, sessions=SESSIONS):
         group = lambda kind: [title(p) for p in sorted(pages.values(), key=lambda p: p["rel"]) if p["kind"] == kind]
         archive = [{name: items} for name, items in (("Stages", group("state")), ("Issues", group("issues"))) if items]
         mounts = sorted(m for m in (proj / "mounts").iterdir() if m.is_dir()) if (proj / "mounts").is_dir() else []
+        for f in proj.rglob("*"):
+            if f.suffix.lower() in ASSETS and f.is_file() and not (SKIP | {"node_modules", ".git"}) & set(f.relative_to(proj).parts):
+                links[f"{base}/{f.relative_to(proj).as_posix()}"] = f.resolve()
         for m in mounts:   # 바깥 문서는 복사하지 않고 심링크로 건다 — 원본이 바뀌면 사이트도 바로 바뀐다
             links[f"{base}/mounts/{m.name}"] = m.resolve()
         section = [{"Agent State": f"{base}/current_status.md"}, {"Short Term Memory": group("rules")},
@@ -210,6 +233,10 @@ def build(hub, memory_dir=MEMORY_DIR, skills_dir=SKILLS_DIR, sessions=SESSIONS):
                       "group": "project", "url": f"{base}/current_status.html",
                       "title": (f"{reg['note']}\n" if reg.get("note") else "") + f"{proj.name} — {active} · context {ctx:,}/{docs_build.CONTEXT_LIMIT:,}자 · 열린 이슈 {kinds('issues', 'open')}",
                       "bad": bool(fails[proj.name]) or ctx > docs_build.CONTEXT_LIMIT})
+        for st in stores_of(proj):   # 데이터 저장소(카탈로그 수집기의 _catalog/stores.json) — 프로젝트를 펼치면 보인다
+            nodes.append({"id": f"store:{st['store']}", "label": st["label"], "group": "store", "parent": pn,
+                          "url": f"{base}/current_status.html", "title": st["label"]})
+            edges.append({"from": pn, "to": f"store:{st['store']}", "kind": "in"})
         for pid, pg in pages.items():
             nid = f"{proj.parent.name}/{proj.name}:{pid}"
             nodes.append({"id": nid, "label": pg["title"][:28], "group": pg["kind"], "url": f"{base}/{pg['rel'][:-3]}.html",
@@ -328,7 +355,7 @@ def build(hub, memory_dir=MEMORY_DIR, skills_dir=SKILLS_DIR, sessions=SESSIONS):
     edges = [e for e in edges if e["from"] in ids and e["to"] in ids]
     out["assets/graph.json"] = json.dumps({"nodes": nodes, "edges": edges}, ensure_ascii=False, sort_keys=True)
     tpl = Path(__file__).resolve().parent.parent / "templates/hub"
-    for name in ("graph.js", "graph.css"):
+    for name in ("graph.js", "graph.css", "mathjax.js"):
         out[f"assets/{name}"] = (tpl / name).read_text(encoding="utf-8")
     out["index.md"] = "\n".join(["# docs-hub", "",
                                  '<div class="hub-graph" id="hub-graph" data-src="assets/graph.json"></div>',
@@ -352,9 +379,10 @@ def build(hub, memory_dir=MEMORY_DIR, skills_dir=SKILLS_DIR, sessions=SESSIONS):
         "      toggle: {icon: material/brightness-7, name: dark}",
         "    - media: '(prefers-color-scheme: dark)'", "      scheme: slate",
         "      toggle: {icon: material/brightness-4, name: light}",
-        "markdown_extensions: [tables, toc, admonition, pymdownx.details]", "plugins: [search]",
+        "markdown_extensions: [tables, toc, admonition, pymdownx.details, {pymdownx.arithmatex: {generic: true}}]", "plugins: [search]",
         "extra_css: [assets/graph.css]",
-        "extra_javascript: [https://cdnjs.cloudflare.com/ajax/libs/vis-network/10.1.2/standalone/umd/vis-network.min.js, assets/graph.js]",
+        "extra_javascript: [https://cdnjs.cloudflare.com/ajax/libs/vis-network/10.1.2/standalone/umd/vis-network.min.js, assets/graph.js, "
+        "assets/mathjax.js, https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-chtml-full.min.js]",
         "nav: " + json.dumps(nav, ensure_ascii=False), ""])
     written = []
     for rel, text in {**{f"_site/{k}": v for k, v in out.items()}, "mkdocs.yml": yml}.items():
@@ -409,6 +437,13 @@ def selftest():
         docs_build.run(t / "hub/projects/o/p", quiet=True)
         from memory_build import add_alias
         add_alias("피", "p", "시험", t / "mem"); add_alias("P1", "p", "시험", t / "mem")
+        (t / "hub/projects/o/_catalog").mkdir(parents=True)
+        (t / "hub/projects/o/_catalog/stores.json").write_text(json.dumps([{"store": "p-db", "kind": "postgres", "project": "p"}, {"store": "q-db", "kind": "mongo", "project": "q"}]))
+        (t / "hub/projects/o/_catalog/p-db.json").write_text(json.dumps({"tables": [{"fks": [1, 2]}, {"fks": []}]}))
+        (t / "hub/projects/o/p/figures").mkdir(parents=True, exist_ok=True)
+        (t / "hub/projects/o/p/figures/a.png").write_bytes(b"png")
+        (t / "hub/projects/o/p/history/x.png").parent.mkdir(parents=True, exist_ok=True)
+        (t / "hub/projects/o/p/history/x.png").write_bytes(b"png")
         args = (t / "hub", t / "mem", t / "skills", t / "sess")
         written, fails = build(*args)
         site = t / "hub/_site"
@@ -433,6 +468,13 @@ def selftest():
         assert sh["mem:ltm_a"] == ("child", "area:일하는 방식") and sh["area:일하는 방식"][0] == "all" and sh["org:o"][0] == "base" and sh["hub:ltm"][0] == "all" and "mem:ltm_old" not in sh and "area:보관" not in sh, "기본 화면·펼침·보관 제외"
         assert any(e["from"] == "mem:ltm_a" and e["to"] == "mem:ltm_b" for e in g["edges"]), "메모 링크 선 없음"
         pnode = next(n for n in g["nodes"] if n["id"] == "proj:o/p")
+        assert (site / "projects/o/p/figures/a.png").is_symlink() and (site / "projects/o/p/figures/a.png").read_bytes() == b"png", "그림 미연결"
+        assert not (site / "projects/o/p/history/x.png").exists(), "history 아래 그림까지 연결"
+        yml0 = (t / "hub/mkdocs.yml").read_text()
+        assert "pymdownx.arithmatex" in yml0 and "tex-chtml-full" in yml0 and (site / "assets/mathjax.js").exists(), "수식 설정 없음"
+        snode = next((n for n in g["nodes"] if n["id"] == "store:p-db"), None)
+        assert snode and snode["label"] == "p-db (postgres · 테이블 2 · 외래키 2)" and snode["show"] == "child" and snode["parent"] == "proj:o/p", ("저장소 노드", snode)
+        assert not any(n["id"] == "store:q-db" for n in g["nodes"]), "hub 에 없는 프로젝트의 저장소가 노드로"
         assert pnode["label"].startswith("p (피, P1)") and pnode["title"].startswith("한 줄 p"), ("별칭·한 줄 설명", pnode)
 
         assert 'id="hub-graph"' in (site / "index.md").read_text() and (site / "assets/graph.js").exists() and "mermaid" not in (t / "hub/mkdocs.yml").read_text()

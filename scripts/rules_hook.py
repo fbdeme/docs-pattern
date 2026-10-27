@@ -32,7 +32,7 @@ STATE = Path(os.environ.get("RULES_STATE", Path.home() / ".cache/docs-pattern/ru
 HUB = Path(os.environ.get("RULES_HUB", WORKSPACE / "docs-hub"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import docs_build  # noqa: E402
-from hub_build import read_registry  # noqa: E402
+from hub_build import read_registry, stores_of  # noqa: E402
 import memory_build  # noqa: E402
 MEMORY = Path(os.environ.get("RULES_MEMORY", Path.home() / "memory"))   # 별칭 = Long Term Memory 메모 project-aliases
 
@@ -246,6 +246,9 @@ def render(rules):
                 where = {"Agent State": "current_status.md", "Short Term Memory": "rules/", "Document": "documentation/",
                          "Long Term Memory": "rules/_ltm.md"}[part]
                 ctx[part] = f"(상한 {docs_build.CONTEXT_LIMIT:,}자를 넘어 생략: {len(text):,}자 — `{rules / where}` 를 직접 읽는다. 줄이는 일 = docs_build WARN)"
+        st = stores_of(rules)   # 데이터 저장소 한 줄씩 (구조 전문 = 조직 _catalog/<저장소>.json)
+        if st:
+            ctx["데이터 저장소"] = "\n".join(f"- {x['label']}" for x in st) + f"\n구조 전문 = {rules.parent / '_catalog'}/<저장소>.json"
         return "\n\n".join(out + [f"# {part}\n\n{text}" for part, text in ctx.items() if text])
     root = rules.parent.parent
     pages = sorted(rules.glob("R[0-9][0-9][0-9].md"))
@@ -429,8 +432,11 @@ def selftest():
             (hp / rel).parent.mkdir(parents=True, exist_ok=True)
             (hp / rel).write_text(text)
         (WORKSPACE / "docs-x/src").mkdir(parents=True)
+        (HUB / "projects/ws/_catalog").mkdir(parents=True)
+        (HUB / "projects/ws/_catalog/stores.json").write_text(json.dumps([{"store": "x-db", "kind": "postgres", "project": "docs-x"}]))
         out = read(WORKSPACE / "docs-x/src/m.py", session_id="s8", cwd=str(WORKSPACE))
-        for needle in ("[project ws/docs-x]", "# Agent State", "지금 할 일", "본문 허브규칙", "본문 가", "- [[a]] 나 — 나 한 줄"):
+        for needle in ("[project ws/docs-x]", "# Agent State", "지금 할 일", "본문 허브규칙", "본문 가", "- [[a]] 나 — 나 한 줄",
+                       "# 데이터 저장소", "- x-db (postgres · 구조 미수집)"):
             assert needle in out, f"허브 프로젝트 주입에 {needle!r} 없음: {out}"
         assert "본문 나" not in out and "본문 단계" not in out, "뿌리 아닌 문서 본문이나 Archive 가 들어감"
         assert "project-rules projects" not in out and out.count("[project ws/docs-x]") == 1, "허브 규칙을 옛 경로로도 잡음"

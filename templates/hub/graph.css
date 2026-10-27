@@ -8,3 +8,6 @@
 .hub-legend span.bad.on { color: #d84a4a; }
 .hub-legend span.all { font-weight: 600; }
 .hub-legend span.all.on { color: var(--md-accent-fg-color); }
+
+/* 넓은 수식 블록은 본문 폭에서 잘리지 않고 가로로 스크롤 */
+mjx-container[display="true"] { overflow-x: auto; overflow-y: hidden; max-width: 100%; }
