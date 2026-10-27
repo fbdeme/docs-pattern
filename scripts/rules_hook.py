@@ -199,6 +199,11 @@ def project_map():
     return "\n".join(out)
 
 
+def said(low, word):
+    """word 가 낱말로 나왔나: 앞은 글자가 아니고, 뒤는 영숫자·- 가 아니다(한국어 조사 '를 · 는 · 에' 는 붙어도 된다)"""
+    return re.search(rf"(?<![\w-]){re.escape(word.lower())}(?![A-Za-z0-9_-])", low) is not None
+
+
 def projects(prompt, bound=()):
     """@이름 · --enter · 파일 경로로 이 세션에 붙은 프로젝트(bound, 경로 문자열) + 프롬프트에 이름이 나온 프로젝트"""
     found = [Path(b) for b in bound if Path(b).exists()]
@@ -206,9 +211,13 @@ def projects(prompt, bound=()):
     for rules in all_rule_dirs():
         if rules in found:
             continue
-        named = re.search(rf"(?<![\w-]){re.escape(name_of(rules).lower())}(?![\w-])", low)
+        named = said(low, name_of(rules))
         if named or any(w in low for w in triggers(rules)):
             found.append(rules)
+    for word, name in memory_build.project_aliases(MEMORY).items():   # 별칭(Long Term Memory)이 프롬프트에 나오면 그 프로젝트
+        d = resolve(name) if said(low, word) else None
+        if d and d not in found:
+            found.append(d)
     return found
 
 
@@ -474,6 +483,9 @@ def selftest():
         assert "별칭 '디 엑스' → docs-x" in r.stdout and memory_build.project_aliases(MEMORY).get("디 엑스") == "docs-x", "--as 가 별칭을 LTM 에 저장 안 함"
         r = subprocess.run([sys.executable, __file__, "--enter", "디 엑스"], env=env, capture_output=True, text=True)
         assert "[project ws/docs-x]" in r.stdout, "저장한 별칭으로 못 부름"
+        for i, (prompt, hit) in enumerate((("엑스 결과 보자", True), ("DX를 열어", True), ("dx-tool 설치", False), ("docs-x의 상태", True))):
+            got = "[project ws/docs-x]" in hook(hook_event_name="UserPromptSubmit", prompt=prompt, session_id=f"al{i}", cwd=str(WORKSPACE))
+            assert got == hit, f"프롬프트 별칭·조사 감지: {prompt!r} → {got}"
         r = subprocess.run([sys.executable, __file__, "--enter", "docs-x", "--as", "DX"], env=env, capture_output=True, text=True)
         assert "별칭" not in r.stdout.split("[project ws/docs-x]")[0] and "저장했다" not in r.stdout, "이미 있는 별칭을 또 저장"
         r = subprocess.run([sys.executable, __file__, "--enter", "없는것"], env=env, capture_output=True, text=True)
@@ -491,7 +503,7 @@ def selftest():
         first = fill([WORKSPACE / "p1", WORKSPACE / "p2"], sn, bd)
         assert "한도를 넘어 뺐다" in first[1] and "한도를 넘어" not in "".join(fill([WORKSPACE / "p0", WORKSPACE / "p2"], sn, bd)), "한도 초과 줄을 매번 반복"
         render = real
-    print("selftest OK — cwd 무시 · 파일 경로·Bash 경로 안전망(세션당 1회) · 프로젝트 지도(별칭·단계·쉬는 중, 시작 위치 무관) · --enter(별칭·registry 경로·모르는 이름) · --enter 기록·compact 뒤 마지막 본문 · 자원 카드(명령 주입·세션당 1회·부분 이름 무시·deny 차단·asset-ok 통과·프롬프트 자원 이름) · 이름 언급·본문 세션당 1회·매번 제목·SessionStart 재주입·변경 재주입·밖에서 무주입·부분 이름 무시·triggers·docs-* 루트·하위 깊이 · 허브(조직 계층·조직 규칙 상속·@묶기/compact 유지/@- 풀기·코드 repo 경로·허브 경로·이름 언급·Agent State/STM/Document(뿌리 본문+summary 나무)·나머지 본문과 Archive 제외·자원 카드)")
+    print("selftest OK — cwd 무시 · 파일 경로·Bash 경로 안전망(세션당 1회) · 프로젝트 지도(별칭·단계·쉬는 중, 시작 위치 무관) · --enter(별칭·registry 경로·모르는 이름) · 프롬프트 별칭·조사 · --enter 기록·compact 뒤 마지막 본문 · 자원 카드(명령 주입·세션당 1회·부분 이름 무시·deny 차단·asset-ok 통과·프롬프트 자원 이름) · 이름 언급·본문 세션당 1회·매번 제목·SessionStart 재주입·변경 재주입·밖에서 무주입·부분 이름 무시·triggers·docs-* 루트·하위 깊이 · 허브(조직 계층·조직 규칙 상속·@묶기/compact 유지/@- 풀기·코드 repo 경로·허브 경로·이름 언급·Agent State/STM/Document(뿌리 본문+summary 나무)·나머지 본문과 Archive 제외·자원 카드)")
 
 
 if __name__ == "__main__":
