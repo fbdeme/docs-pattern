@@ -15,6 +15,8 @@ metadata:
 - **사용자가 말하지 않아도**: 이번 작업이 어떤 프로젝트의 사실(구조·도구·결정·진행 단계·규칙)을 바꿨으면, 그 일을 끝냈다고 보고하기 전에 그 프로젝트 `_inbox/<YYYY-MM-DD>-<주제>.md` 에 사실만 적고 워커로 페이지·history 에 반영한 뒤 `docs_build.py <docs> --check` 0 FAIL 을 확인한다. 이 세션은 페이지를 직접 쓰지 않는다.
 - 분류: 시간이 지나도 참 = Document · 한 번 하고 끝나는 절차 = 그 이슈 · 진행 = active 단계 · 늘 지킬 규칙·사실 = R###.
 - 여러 프로젝트에 두루 쓰이는 것은 Long Term Memory(`~/memory`, 틀 = `templates/memory/`)에 둔다.
+- **프로젝트 불러오기**: 어떤 프로젝트의 일을 시작하기 전 → `python3 ~/workspace/docs-pattern/scripts/rules_hook.py --enter <이름|별칭>` 을 Bash 로 부른다(출력 = 그 프로젝트의 Agent State · Short Term Memory · Document 목차 · 고른 Long Term Memory). 이름·별칭은 세션 시작의 `[project-map]` 지도에서 고르고, 프로젝트를 옮길 때마다 다시 부른다. cwd 는 기준이 아니다.
+- 사용자가 지도에 없는 말로 프로젝트를 부르면 → `--enter <이름> --as <그 말>` 로 부른다. 별칭이 Long Term Memory `project-aliases` 에 저장된다. 부르지 않고 그 프로젝트 파일을 건드리면 훅이 대신 넣고 `[project-enter]` 로 알린다(안전망).
 <!-- /core -->
 
 # docs-pattern v2
@@ -119,6 +121,22 @@ Claude 메모리가 아니라 `docs/rules/R###.md` 에 둔다. 메모리는 길�
   쓴다. 워커는 카드를 고치고, 지금 프로젝트에는 링크만 남긴다.
 - 왜: 2026-10-05 SapiensQ 서버의 집 IP 등록·배정 사실이 그때 작업하던 jepa-pfn 문서·규칙에만 적혀, 2026-10-12 SapiensQ
   작업에서 불러와지지 않았고 배정되지 않은 서버에 두 번 접속했다(같은 계열 두 번째 사고).
+
+## 프로젝트 불러오기 — cwd 가 아니라 `--enter` 와 파일 경로
+
+어디서 세션을 열었는지(cwd)에 따라 기억이 달라지면 안 된다(사용자는 `~/workspace` · `~/INTERX` · `~/SapiensQ` 같은 조직 폴더에서 연다). 그래서:
+
+| 언제 | 들어오는 것 | 누가 넣나 |
+|---|---|---|
+| 세션 시작 · compact 직후 (어디서 열든 같음) | 필수 스킬 · 필수 메모 · 인프라 · 프로젝트 지도 `[project-map]` | SessionStart 훅 (`memory_build.py --always` · `--infra` · `rules_hook.py`) |
+| 에이전트가 `--enter` 를 부를 때 | 그 프로젝트의 Agent State · Short Term Memory · Document 목차 · 고른 Long Term Memory(`rules/_ltm.md`) · 조직 공통 Short Term Memory | 명령 출력 |
+| 부르지 않고 그 프로젝트의 파일을 읽거나 고치거나 명령에 그 경로가 나올 때 | 위와 같음 + `[project-enter]` 알림 | PreToolUse 훅 (Read · Edit · Write · Grep · Glob · Bash, heredoc 명령은 제외) |
+| 프롬프트에 프로젝트의 정식 이름 · `triggers:` 낱말 · `@이름` 이 나올 때 | 위와 같음 | UserPromptSubmit 훅 |
+
+- 한 번 넣은 프로젝트는 내용이 바뀌지 않으면 다시 넣지 않고, 매 프롬프트에 규칙 제목 한 줄만 붙는다. 세션 기록(`~/.cache/docs-pattern/rules_hook/<세션>.bind`)에 남아 compact 뒤에는 마지막에 부른 프로젝트 본문이 다시 들어오고, 나머지는 이름만 남는다. `@-` 로 지운다.
+- 한 번에 넣는 글은 9,500자 안에서 자르고, 넘는 프로젝트는 "`--enter` 로 부른다" 한 줄로 한 번만 알린다.
+- 지도 원본 = `~/workspace/docs-hub/projects/<조직>/_registry.md`(프로젝트 · status · 경로 · docs · 메모 = 한 줄 설명). 진행 중은 이름 · 별칭 · 한 줄 · 지금 단계, 쉬는 중은 이름만. `rules_hook.py --map` 으로 지도만 본다. docs-hub Home 그래프도 같은 원본으로 그린다.
+- 별칭 = Long Term Memory 메모 `~/memory/project-aliases.md`(core 의 `- 말: 프로젝트` 줄 + 근거 줄). `--enter <이름> --as <말>` 이 자동으로 더하고, 손으로 고쳐도 된다. `--enter` 는 이름 · 별칭을 대소문자 없이 찾고, 허브에 없으면 registry `경로` 칸의 repo 에서 옛 `docs/rules` 를 찾는다. 못 찾으면 지도를 보이고 exit 1.
 
 ## 메모리와의 관계
 

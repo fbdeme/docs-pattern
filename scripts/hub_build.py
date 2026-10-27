@@ -169,6 +169,10 @@ def build(hub, memory_dir=MEMORY_DIR, skills_dir=SKILLS_DIR, sessions=SESSIONS):
     orgs = sorted((o for o in (hub / "projects").iterdir() if o.is_dir()), key=lambda o: (ORDER.index(o.name) if o.name in ORDER else 99, o.name)) if (hub / "projects").exists() else []
     projects = [p for o in orgs for p in sorted(o.iterdir()) if p.is_dir() and not p.name.startswith(("_", ".")) and p.name != "rules"]   # . = 조직 폴더가 따로 git 이면 .git
     registry = {o.name: read_registry(o) for o in orgs}   # 조직마다 _registry.md: 이름 · status · 경로 · 메모
+    from memory_build import ALIASES, project_aliases
+    af = Path(memory_dir) / ALIASES   # 별칭 = Long Term Memory 메모 project-aliases (원래 철자로)
+    spell = {w.lower(): w for w in re.findall(r"^- ([^:\n]+):", af.read_text(encoding="utf-8"), re.M)} if af.exists() else {}
+    alias_of = lambda name: [spell.get(w, w) for w, n in project_aliases(memory_dir).items() if n.lower() == name.lower()]
     rows, nodes, edges, proj_nav, links = [], [], [], {}, {}
     for proj in projects:
         pages, _ = docs_build.load(proj)
@@ -200,9 +204,11 @@ def build(hub, memory_dir=MEMORY_DIR, skills_dir=SKILLS_DIR, sessions=SESSIONS):
         ctx = sum(map(len, docs_build.context(proj, pages).values()))
         kinds = lambda k, st=None: sum(1 for p in pages.values() if p["kind"] == k and (st is None or p["status"] == st))
         pn = f"proj:{proj.parent.name}/{proj.name}"
-        nodes.append({"id": pn, "label": proj.name + (f" · 열린 이슈 {kinds('issues', 'open')}" if kinds("issues", "open") else ""),
+        reg = next((r for r in registry.get(proj.parent.name, []) if r["name"] == proj.name), {})
+        nodes.append({"id": pn, "label": proj.name + (f" ({', '.join(alias_of(proj.name))})" if alias_of(proj.name) else "")
+                      + (f" · 열린 이슈 {kinds('issues', 'open')}" if kinds("issues", "open") else ""),
                       "group": "project", "url": f"{base}/current_status.html",
-                      "title": f"{proj.name} — {active} · context {ctx:,}/{docs_build.CONTEXT_LIMIT:,}자 · 열린 이슈 {kinds('issues', 'open')}",
+                      "title": (f"{reg['note']}\n" if reg.get("note") else "") + f"{proj.name} — {active} · context {ctx:,}/{docs_build.CONTEXT_LIMIT:,}자 · 열린 이슈 {kinds('issues', 'open')}",
                       "bad": bool(fails[proj.name]) or ctx > docs_build.CONTEXT_LIMIT})
         for pid, pg in pages.items():
             nid = f"{proj.parent.name}/{proj.name}:{pid}"
@@ -304,15 +310,18 @@ def build(hub, memory_dir=MEMORY_DIR, skills_dir=SKILLS_DIR, sessions=SESSIONS):
     nodes.append({"id": "hub:ltm", "label": "Long Term Memory", "group": "org", "url": "long-term-memory/index.html", "title": "Long Term Memory 개요"})
     edges.extend({"from": n["id"], "to": "hub:ltm", "kind": "in"} for n in nodes if n["group"] == "area" and n["id"] not in ("hub:skills",))
     edges.append({"from": "hub:skills", "to": "area:필수", "kind": "in"})
-    # 기본 화면 = 지금 진행 중인 것만(조직 · 프로젝트 · 진행 중 단계 · 분야 · 필수 · 스킬 묶음). 나머지는 부모 점을 눌러 펼치거나 '모두 보기'
+    # 기본 화면 = 프로젝트 지도(조직 · 진행 중 프로젝트 · 그 진행 중 단계) — 세션 시작에 Agent 가 받는 지도와 같은 원본(_registry.md).
+    # 프로젝트 점을 누르면 그 아래가 펼쳐지고, Long Term Memory · 스킬은 '모두 보기'(또는 메뉴)에서 본다
     for n in nodes:
         g = n["group"]
         if g in ("state", "issues", "rules", "doc"):
             n["parent"] = "proj:" + n["id"].split(":")[0]
             n["show"] = ("base" if n.get("status") == "active" else "all") if g == "state" else \
                         ("child" if n.get("status") == "open" else "all") if g == "issues" else "child"
+        elif g == "project" or (g == "org" and n["id"].startswith("org:")):
+            n["show"] = "base"
         else:
-            n["show"] = "child" if n.get("parent") else "base"
+            n["show"] = "child" if n.get("parent") else "all"
         if n["id"] == "area:필수":
             n["label"] = f"필수 {sum(1 for m in nodes if m.get('parent') == 'area:필수')}"
     ids = {n["id"] for n in nodes}
@@ -324,7 +333,8 @@ def build(hub, memory_dir=MEMORY_DIR, skills_dir=SKILLS_DIR, sessions=SESSIONS):
     out["index.md"] = "\n".join(["# docs-hub", "",
                                  '<div class="hub-graph" id="hub-graph" data-src="assets/graph.json"></div>',
                                  '<div class="hub-legend" id="hub-legend"></div>', "",
-                                 f"처음엔 지금 진행 중인 것만 보인다(점 {sum(1 for n in nodes if n['show'] == 'base')} / 전체 {len(nodes)}). 프로젝트·분야·필수·스킬 점을 누르면 그 아래가 펼쳐지고 다시 누르면 접힌다. "
+                                 f"처음엔 프로젝트 지도만 보인다 — 조직 · 진행 중 프로젝트(괄호 = 별칭) · 그 진행 중 단계(점 {sum(1 for n in nodes if n['show'] == 'base')} / 전체 {len(nodes)}). "
+                                 "Agent 가 세션 시작에 받는 지도와 같은 원본(`projects/<조직>/_registry.md`)이다. 프로젝트 점을 누르면 그 아래가 펼쳐지고 다시 누르면 접힌다. "
                                  "두 번 누르면 그 page 로 간다. '모두 보기'는 끝난 단계·닫힌 이슈까지 전부, 범례의 종류를 누르면 그 종류를 숨긴다, '문제 보기'는 문제 점만 빨간 테두리로. 보관 메모는 그래프에 없다(Long Term Memory › 보관).", "",
                                  "## 프로젝트", "", "프로젝트마다 Agent State(지금 상황 한 장)부터 본다.", "",
                                  "| 조직 | 프로젝트 | 입구 | 현재 단계 | Short Term Memory | docs 검사 |",
@@ -377,7 +387,7 @@ def selftest():
     with tempfile.TemporaryDirectory() as tmp:
         t = Path(tmp)
         w = lambda rel, s: ((t / rel).parent.mkdir(parents=True, exist_ok=True), (t / rel).write_text(s))
-        w("hub/projects/o/_registry.md", "| 프로젝트 | status | 경로 | docs | 메모 |\n|---|---|---|---|---|\n| p | active | ~/p | hub | |\n| q | paused | ~/q | — | 쉬는 중 |\n")
+        w("hub/projects/o/_registry.md", "| 프로젝트 | status | 경로 | docs | 메모 |\n|---|---|---|---|---|\n| p | active | ~/p | hub | 한 줄 p |\n| q | paused | ~/q | — | 쉬는 중 |\n")
         w("hub/projects/o/p/state/S001.md", "---\ntitle: 시작\nstatus: active\n---\n[[arch|구조]]")
         w("hub/projects/o/p/documentation/arch.md", "---\ntitle: 구조\n---\n[[S001#목표]]")
         w("hub/projects/o/p/rules/R001.md", "---\ntitle: 규칙 하나\n---\n[[S001]]")
@@ -397,6 +407,8 @@ def selftest():
         (t / "hub/projects/o/p/mounts").mkdir(parents=True)
         (t / "hub/projects/o/p/mounts/제품문서").symlink_to(t / "ext")
         docs_build.run(t / "hub/projects/o/p", quiet=True)
+        from memory_build import add_alias
+        add_alias("피", "p", "시험", t / "mem"); add_alias("P1", "p", "시험", t / "mem")
         args = (t / "hub", t / "mem", t / "skills", t / "sess")
         written, fails = build(*args)
         site = t / "hub/_site"
@@ -418,8 +430,11 @@ def selftest():
         assert {"from": "o/p:arch", "to": "o/p:S001", "kind": "link"} in g["edges"], "page 링크 선 없음"
         sh = {n["id"]: (n["show"], n.get("parent")) for n in g["nodes"]}
         assert sh["o/p:S001"] == ("base", "proj:o/p") and sh["o/p:arch"] == ("child", "proj:o/p") and sh["proj:o/p"][0] == "base", sh
-        assert sh["mem:ltm_a"] == ("child", "area:일하는 방식") and sh["area:일하는 방식"][0] == "base" and "mem:ltm_old" not in sh and "area:보관" not in sh, "기본 화면·펼침·보관 제외"
+        assert sh["mem:ltm_a"] == ("child", "area:일하는 방식") and sh["area:일하는 방식"][0] == "all" and sh["org:o"][0] == "base" and sh["hub:ltm"][0] == "all" and "mem:ltm_old" not in sh and "area:보관" not in sh, "기본 화면·펼침·보관 제외"
         assert any(e["from"] == "mem:ltm_a" and e["to"] == "mem:ltm_b" for e in g["edges"]), "메모 링크 선 없음"
+        pnode = next(n for n in g["nodes"] if n["id"] == "proj:o/p")
+        assert pnode["label"].startswith("p (피, P1)") and pnode["title"].startswith("한 줄 p"), ("별칭·한 줄 설명", pnode)
+
         assert 'id="hub-graph"' in (site / "index.md").read_text() and (site / "assets/graph.js").exists() and "mermaid" not in (t / "hub/mkdocs.yml").read_text()
         yml = (t / "hub/mkdocs.yml").read_text()
         assert '"Agent State"' in yml and '"일하는 방식"' in yml and '"미분류"' in yml and '"개요"' in yml, yml

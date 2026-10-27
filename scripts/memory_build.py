@@ -348,11 +348,42 @@ def infra_text(store=None):
     return text, warns
 
 
+ALIASES = "project-aliases.md"   # 사용자가 프로젝트를 부르는 말 → 프로젝트 이름 (Long Term Memory 메모 하나)
+
+
+def project_aliases(store=None):
+    """-> {말(소문자): 프로젝트 이름}. 메모 core 의 `- 말: 프로젝트` 줄"""
+    f = Path(store or STORE) / ALIASES
+    m = re.search(r"<!-- core -->\n?(.*?)<!-- /core -->", f.read_text(encoding="utf-8"), re.S) if f.exists() else None
+    return {k.strip().lower(): v.strip() for k, _, v in (l[2:].partition(":") for l in (m.group(1) if m else "").splitlines()
+            if l.startswith("- ")) if k.strip() and v.strip()}
+
+
+def add_alias(word, project, why, store=None, today=None):
+    """별칭 한 줄을 메모 core 에, 근거 한 줄을 본문 끝에 더한다 -> 더했으면 True. 메모가 없으면 만든다"""
+    import datetime
+    f, today = Path(store or STORE) / ALIASES, today or datetime.date.today().isoformat()
+    if word.strip().lower() in project_aliases(store) or ":" in word or "\n" in word:
+        return False
+    if not f.exists():
+        f.write_text("---\nname: project-aliases\ndescription: 사용자가 프로젝트를 부르는 말(별칭) → 프로젝트 이름 — 지도 · --enter · Home 그래프가 읽는다\n"
+                     f"type: reference\narea: [프로젝트]\norg:\nupdated: {today}\n---\n<!-- core -->\n<!-- /core -->\n"
+                     "**무엇:** 사용자가 프로젝트를 부르는 말과 그 프로젝트의 정식 이름(`projects/<조직>/_registry.md` 의 이름). "
+                     "`rules_hook.py --enter <프로젝트> --as <말>` 이 줄을 더한다 — 손으로 고쳐도 된다.\n**근거:**\n", encoding="utf-8")
+    t = f.read_text(encoding="utf-8").replace("<!-- /core -->", f"- {word.strip()}: {project}\n<!-- /core -->", 1)
+    t = re.sub(r"^updated:.*$", f"updated: {today}", t, count=1, flags=re.M)
+    f.write_text(t.rstrip("\n") + f"\n- {word.strip()}: {today} {why}\n", encoding="utf-8")
+    return True
+
+
 def selftest():
     with tempfile.TemporaryDirectory() as tmp:
         m = Path(tmp)
         (m / "_root.md").write_text("이 사용자와 일하는 모델.\n")
         (m / "a.md").write_text("---\nname: a\ndescription: 설명 a\narea: 일하는 방식\n---\n본문")
+        assert add_alias("EEG", "EEG-WM-JEPA", "대화 기록 264회", m, "2026-10-27") and not add_alias("eeg", "x", "", m), "별칭 추가·중복"
+        assert add_alias("KB", "knowledgebuilder", "--as", m, "2026-10-27") and project_aliases(m) == {"eeg": "EEG-WM-JEPA", "kb": "knowledgebuilder"}
+        assert "- KB: 2026-10-27 --as" in (m / ALIASES).read_text() and not add_alias("a: b", "x", "", m)
         (m / "b.md").write_text("---\nname: b\ndescription: 설명 b\nmetadata:\n  area: 사용자\n---\n본문")
         (m / "c.md").write_text("---\nname: c\ndescription: 설명 c\narea: 없는분야\nindex: 제목 c — 고리 c\n---\n")
         (m / "MEMORY.md").write_text("- [옛 제목 b](b.md) — 옛 고리\n- [사라진](gone.md)\n")
