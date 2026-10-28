@@ -47,8 +47,8 @@ def rule_dirs(d):
 
 
 def is_hub(p):
-    """hub 프로젝트 = HUB/projects/<조직>/<프로젝트>/"""
-    return p.parent.parent == HUB / "projects"
+    """hub 프로젝트 = HUB/projects/<조직>/<프로젝트>/ (`_catalog` · `rules` 같은 조직 폴더의 부속 폴더는 아니다)"""
+    return p.parent.parent == HUB / "projects" and not p.name.startswith(("_", ".")) and p.name != "rules"
 
 
 def hub_projects():
