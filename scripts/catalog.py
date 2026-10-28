@@ -10,11 +10,17 @@
   누가 무엇을 볼지는 보는 쪽(로그인 · 역할)이 거른다. 결정론(시각 없음, 정렬).
 - RDF `--publish`: RDF_ORGS(개인) 저장소만 ontic-fuseki 의 이름 있는 그래프 GRAPH 를 교체한다(기본 그래프 = 데모 온톨로지는 건드리지 않음).
 
-사용: python3 catalog.py [--hub ~/workspace/docs-hub] [--publish]   ·   python3 catalog.py --selftest
+- 샘플 `--samples <폴더> [--orgs a,b]`: postgres · mysql · mongo 의 표 · 컬렉션마다 앞 SAMPLE_ROWS 행을 <폴더>/<저장소>.json 에 쓴다(실제 값이므로 git 밖 폴더).
+  이름이 비밀번호 · 토큰 · 키 · 세션 · 이메일 · 전화 등인 컬럼과, 값이 이메일 · 긴 토큰처럼 보이는 칸은 MASK 로 바꾼다. 값은 SAMPLE_CHARS 자에서 자른다.
+
+사용: python3 catalog.py [--hub ~/workspace/docs-hub] [--publish]   ·   python3 catalog.py --samples ~/.local/share/ontic/samples [--orgs workspace]
+      python3 catalog.py --selftest
 """
 from __future__ import annotations
 
 import base64
+import csv
+import io
 import json
 import os
 import re
@@ -33,6 +39,14 @@ GRAPH = "urn:ontic:catalog"
 FUSEKI = os.environ.get("ONTIC_FUSEKI", "http://127.0.0.1:3031/ontic")
 S = "urn:ontic:catalog:"
 MONGO_JS = Path(__file__).with_name("catalog_mongo.js")
+SAMPLE_ROWS, SAMPLE_CHARS, MASK = 10, 80, "•••"
+SECRET_COL = re.compile(r"pass|pwd|token|secret|key|hash|salt|session|auth|cookie|otp|credential|e_?mail|phone|mobile|^tel|ssn|card|iban|address", re.I)
+SECRET_VAL = re.compile(r"^[\w.+-]+@[\w-]+(\.[\w-]+)+$|^[A-Za-z0-9+/=_.$-]{32,}$")   # 이메일 · 긴 토큰 · 해시
+EMAIL_IN = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")   # JSON 같은 긴 값 안에 섞인 이메일
+MONGO_SAMPLE_JS = """var want = JSON.parse(%s), out = {};   // ES5 — mongo 4.0 셸도 읽게(구조 분해 · EJSON 없음)
+for (var i = 0; i < want.length; i++) { var d = want[i][0], c = want[i][1];
+  out[d + '/' + c] = db.getSiblingDB(d).getCollection(c).find({}).limit(%d).toArray().map(function (x) { return JSON.parse(typeof EJSON === 'undefined' ? JSON.stringify(x) : EJSON.stringify(x, {relaxed: true})); }); }
+print(JSON.stringify(out));"""
 
 COLS_SQL = ("SELECT c.table_schema, c.table_name, c.column_name, c.data_type, c.is_nullable FROM information_schema.columns c "
             "JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name "
@@ -191,8 +205,11 @@ def mongo_schema(container: str, runner=run) -> dict:
 
 def couch_schema(container: str, runner=run) -> dict:
     get = lambda path: json.loads(sh(container, 'curl -s -u "$COUCHDB_USER:$COUCHDB_PASSWORD" "http://127.0.0.1:5984/$1"', path, runner=runner))
+    names = get("_all_dbs")
+    if isinstance(names, dict):   # 오류 응답 {"error","reason"} — 그 키를 DB 이름으로 읽으면 안 된다
+        raise ValueError(f"couchdb {names.get('error')}: {names.get('reason')}")
     dbs = []
-    for db in sorted(d for d in get("_all_dbs") if not d.startswith("_")):
+    for db in sorted(d for d in names if not d.startswith("_")):
         e = urllib.parse.quote(db, safe="")
         info, docs = get(e), get(e + "/_all_docs?limit=5&include_docs=true").get("rows", [])
         dbs.append({"db": db, "docs": info.get("doc_count", 0), "fields": sorted({k for r in docs for k in (r.get("doc") or {})})})
@@ -239,6 +256,67 @@ def redis_schema(container: str, runner=run) -> dict:
         pre[p] = pre.get(p, 0) + 1
     return {"keyspace": {m.group(1): int(m.group(2)) for m in re.finditer(r"^(db\d+):keys=(\d+)", info, re.M)},
             "prefixes": [{"prefix": p, "keys": n} for p, n in sorted(pre.items(), key=lambda x: -x[1])[:30]], "scanned": len(keys)}
+
+
+def mask(cols: list[str], rows: list[list]) -> tuple[list[list[str]], list[str]]:
+    """민감해 보이는 컬럼 · 값을 가리고 길이를 자른다 → (행, 가린 컬럼)"""
+    hidden = [c for c in cols if SECRET_COL.search(c)]
+    def cell(c, v):
+        if v is None:
+            return None
+        v = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+        return MASK if c in hidden or SECRET_VAL.match(v.strip()) else EMAIL_IN.sub(MASK, v)[:SAMPLE_CHARS]
+    return [[cell(c, v) for c, v in zip(cols, r)] for r in rows], hidden
+
+
+def sql_sample(kind: str, container: str, tables: list[dict], runner=run) -> dict:
+    out = {}
+    csv.field_size_limit(1 << 30)   # 큰 칸(문서 · 바이너리)도 읽고, 자르기는 mask() 가 한다
+    for t in tables:
+        try:
+            rows = sql_rows(kind, container, t, runner)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, csv.Error):   # 표 하나가 실패해도 그 저장소의 나머지는 모은다
+            continue
+        if rows:
+            body, hidden = mask(rows[0], rows[1:])
+            out[f"{t['schema']}/{t['table']}"] = {"columns": rows[0], "rows": body, "masked": hidden}
+    return out
+
+
+def sql_rows(kind: str, container: str, t: dict, runner=run) -> list[list]:
+    if kind == "postgres":
+        ident = '"%s"."%s"' % (t["schema"].replace('"', '""'), t["table"].replace('"', '""'))
+        text = sh(container, 'psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-${POSTGRES_USER:-postgres}}" -AtX -c "$1"',
+                  f"COPY (SELECT * FROM {ident} LIMIT {SAMPLE_ROWS}) TO STDOUT WITH CSV HEADER", runner=runner)
+        rows = list(csv.reader(io.StringIO(text)))
+        rows = [[None if v == "" else v for v in r] for r in rows]
+    else:
+        script = ('U="${MARIADB_USER:-$MYSQL_USER}"; P="${MARIADB_PASSWORD:-$MYSQL_PASSWORD}"; D="${MARIADB_DATABASE:-$MYSQL_DATABASE}"; '
+                  'B=$(command -v mariadb || command -v mysql); "$B" -u"$U" -p"$P" -D "$D" -B -e "$1"')
+        rows = [[None if v == "NULL" else v for v in r] for r in tsv(sh(container, script, "SELECT * FROM `%s` LIMIT %d" % (t["table"].replace("`", "``"), SAMPLE_ROWS), runner=runner))]
+    return rows
+
+
+def mongo_sample(container: str, collections: list[dict], runner=run) -> dict:
+    script = ('B=$(command -v mongosh || command -v mongo); '
+              'if [ -n "$MONGO_INITDB_ROOT_USERNAME" ]; then "$B" --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" '
+              '--authenticationDatabase admin --eval "$(cat)"; else "$B" --quiet --eval "$(cat)"; fi')
+    want = json.dumps([[c["db"], c["collection"]] for c in collections])
+    docs = json.loads(sh(container, script, stdin=MONGO_SAMPLE_JS % (json.dumps(want), SAMPLE_ROWS), runner=runner).strip().splitlines()[-1])
+    out = {}
+    for k, ds in docs.items():
+        cols = list(dict.fromkeys(f for d in ds for f in d))
+        body, hidden = mask(cols, [[d.get(c) for c in cols] for d in ds])
+        out[k] = {"columns": cols, "rows": body, "masked": hidden}
+    return out
+
+
+def samples(s: dict, schema: dict, runner=run) -> dict:
+    if s["kind"] in ("postgres", "mysql"):
+        return sql_sample(s["kind"], s["store"], schema.get("tables", []), runner)
+    if s["kind"] == "mongo":
+        return mongo_sample(s["store"], schema.get("collections", []), runner)
+    return {}
 
 
 def collect(s: dict, inspect: list[dict], runner=run) -> dict:
@@ -294,6 +372,28 @@ def publish(ttl: str) -> int:
 def write(path: Path, obj) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def main_samples(hub: Path, out: Path, orgs: set[str] | None) -> None:
+    """표 · 컬렉션의 앞 몇 행 → out/<저장소>.json (실제 값이므로 git 밖 폴더에만)"""
+    import time
+    ids = run(["docker", "ps", "-q"]).split()
+    inspect = json.loads(run(["docker", "inspect", *ids])) if ids else []
+    done, errors = {}, {}
+    for s in stores(inspect, registry(hub), systemd_units()):
+        if s["kind"] not in ("postgres", "mysql", "mongo") or (orgs and s["org"] not in orgs):
+            continue
+        try:
+            got = samples(s, collect(s, inspect))
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError, KeyError, IndexError) as e:
+            errors[s["store"]] = f"{type(e).__name__}: {(getattr(e, 'stderr', '') or str(e))[:160]}"
+            continue
+        out.mkdir(parents=True, exist_ok=True)
+        f = out / f"{s['store']}.json"
+        f.write_text(json.dumps({"store": s["store"], "collected_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "samples": got}, ensure_ascii=False) + "\n", encoding="utf-8")
+        f.chmod(0o600)
+        done[s["store"]] = len(got)
+    print(f"샘플 {sum(done.values())}개 자산 · 저장소별 {done} · 실패 {errors or '없음'} → {out}")
 
 
 def main(hub: Path, do_publish: bool) -> None:
@@ -362,8 +462,21 @@ def selftest() -> None:
         ttl = to_turtle([s for s in led if s["store"] == "app-db"], {"app-db": {"tables": tabs}})
         assert f"<{S}app-db/public/orders> <{S}references> <{S}app-db/public/users> ." in ttl and f"<{S}service/api> a <{S}Service> ; <{S}uses> <{S}app-db>" in ttl
         assert "x-db" not in to_turtle([s for s in led if s["org"] in RDF_ORGS], {}), "RDF 조직 밖 저장소가 들어감"
+        try:
+            couch_schema("c", lambda cmd, stdin=None: '{"error":"unauthorized","reason":"Name or password is incorrect."}'); raise AssertionError("couchdb 오류 응답을 DB 목록으로 읽음")
+        except ValueError:
+            pass
+        csv_text = 'id,email,note,pw_hash\n1,a@b.co,"hi, there",x\n2,,' + "y" * 100 + ',z\n'
+        sm = sql_sample("postgres", "p", [{"schema": "public", "table": "users"}], lambda cmd, stdin=None: csv_text)["public/users"]
+        assert sm["columns"] == ["id", "email", "note", "pw_hash"] and sm["masked"] == ["email", "pw_hash"], sm
+        assert sm["rows"][0] == ["1", MASK, "hi, there", MASK] and sm["rows"][1][1] is None and sm["rows"][1][2] == MASK, sm   # 100자 토큰 꼴 값도 가린다
+        assert mask(["note"], [["x" * 200 + " y"]])[0][0][0] == "x" * SAMPLE_CHARS, "길이를 자르지 않음"
+        assert mask(["data"], [['{"email":{"value":"me@x.org"}}']])[0][0][0] == '{"email":{"value":"' + MASK + '"}}', "값 안의 이메일을 가리지 않음"
+        mg = mongo_sample("m", [{"db": "kb", "collection": "e"}], lambda cmd, stdin=None: 'x\n{"kb/e":[{"_id":"1","name":"a","token":"t"},{"_id":"2","tags":["p"]}]}\n')["kb/e"]
+        assert mg["columns"] == ["_id", "name", "token", "tags"] and mg["rows"][0][2] == MASK and mg["rows"][1][3] == '["p"]', mg
     print("selftest OK — 대장(종류 · 가장 가까운 registry 폴더 · 클라이언트 제외) · 연결(같은 프로젝트 서비스 이름 · 다른 프로젝트 컨테이너 이름 · 호스트 포트 · systemd · "
-          "다른 프로젝트 depends_on 제외 · 값 안 남김) · 표 구조 · redis 접두어 · mongo 정렬 · RDF(사용 서비스 · 외래키 · 조직 경계)")
+          "다른 프로젝트 depends_on 제외 · 값 안 남김) · 표 구조 · redis 접두어 · mongo 정렬 · RDF(사용 서비스 · 외래키 · 조직 경계) · "
+          "couchdb 오류 응답 · 샘플(CSV · 가리기 · 자르기 · mongo)")
 
 
 if __name__ == "__main__":
@@ -371,4 +484,8 @@ if __name__ == "__main__":
         selftest()
     else:
         args = sys.argv[1:]
-        main(Path(args[args.index("--hub") + 1]).expanduser() if "--hub" in args else HUB, "--publish" in args)
+        hub = Path(args[args.index("--hub") + 1]).expanduser() if "--hub" in args else HUB
+        if "--samples" in args:
+            main_samples(hub, Path(args[args.index("--samples") + 1]).expanduser(), set(args[args.index("--orgs") + 1].split(",")) if "--orgs" in args else None)
+        else:
+            main(hub, "--publish" in args)
