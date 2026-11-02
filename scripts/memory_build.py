@@ -180,7 +180,7 @@ def sync_views(store=None, views=None):
             if new and "org" not in fm(dst):        # 새 메모의 기본값 = 쓴 계정만 본다
                 set_fm(dst, "org", acct)
             warns.append(f"{acct}: {p.name} 를 원본으로 옮김" + (" (새 메모, org: " + acct + ")" if new else " (수정본)"))
-        want = {p.name for p in store.glob("*.md") if not p.name.startswith("_") and visible(fm(p), acct)}
+        want = {p.name for p in store.glob("*.md") if not p.name.startswith("_") and p.name != "MEMORY.md" and visible(fm(p), acct)}
         for p in view.glob("*.md"):
             if p.is_symlink() and (p.name not in want or not p.exists()):
                 p.unlink()
